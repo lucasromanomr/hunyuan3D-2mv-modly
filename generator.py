@@ -573,7 +573,7 @@ class Hunyuan3D2mvGenerator(BaseGenerator):
         # ---- Load reference images -----------------------------------
         self._report(progress_cb, 8, "Preprocessing reference images...")
 
-        front_path = params.get("front_image_path", "").strip()
+        front_path = params.get("front_image_path", "").strip().strip('"\'')
         if not front_path or not os.path.isfile(front_path):
             raise RuntimeError(
                 "front_image_path is required for texture generation. "
@@ -642,7 +642,9 @@ class Hunyuan3D2mvGenerator(BaseGenerator):
         data_key = "%s_image" % view_name
 
         path = params.get(path_key)
-        if isinstance(path, str) and path.strip() and os.path.isfile(path):
+        if isinstance(path, str):
+            path = path.strip().strip('"\'')
+        if path and os.path.isfile(path):
             return self._preprocess_path(path, remove_bg=remove_bg)
 
         raw = params.get(data_key)
