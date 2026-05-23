@@ -5,7 +5,7 @@
   "source": "https://github.com/iammojogo-sudo/hunyuan3d2mv_development_branch",
   "description": "Multi-view image-to-3D mesh generation using Tencent Hunyuan3D-2mv. Accepts front, left, back and right view images to reconstruct a detailed untextured mesh. Only the front view is required.",
   "version": "1.1.0",
-  "author": "Lightning Pixel",
+  "author": "iammojogo",
   "vram_gb": 8,
   "tags": [
     "image-to-3d",
