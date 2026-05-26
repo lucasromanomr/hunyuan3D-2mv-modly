@@ -443,6 +443,15 @@ class Hunyuan3D2mvGenerator(BaseGenerator):
 
         self._report(progress_cb, 5, "Preprocessing front view...")
         front_image = self._preprocess_bytes(image_bytes, remove_bg=remove_bg)
+        # Cache the front view bytes so a later Texture node in the same
+        # workflow can find it without the user re-selecting the file
+        # (Modly's UI currently can't wire image inputs to a process node).
+        try:
+            cache_path = os.path.join(os.path.dirname(__file__), ".last_front_image.png")
+            with open(cache_path, "wb") as f:
+                f.write(image_bytes)
+        except Exception as e:
+            print("[Hunyuan3D2mvGenerator] front-image cache write failed: %s" % e)
         self._check_cancelled(cancel_event)
 
         image_dict = {"front": front_image}
@@ -575,10 +584,18 @@ class Hunyuan3D2mvGenerator(BaseGenerator):
 
         front_path = self._resolve_image_path(params.get("front_image_path", ""))
         if not front_path:
+            # Fallback: reuse the cached front image from the most recent
+            # shape-generation step. This lets a Generate → Texture workflow
+            # work without the user re-selecting the same image.
+            cached = os.path.join(os.path.dirname(__file__), ".last_front_image.png")
+            if os.path.isfile(cached):
+                front_path = cached
+                print("[Hunyuan3D2mvGenerator] Using cached front image: %s" % cached)
+        if not front_path:
             raise RuntimeError(
                 "front_image_path is required for texture generation. "
-                "Please supply the same front view used for shape generation "
-                "(a .png/.jpg/.jpeg/.webp file, or the folder containing it)."
+                "Run a Generate step first (its front view is cached), or set "
+                "front_image_path to a .png/.jpg/.jpeg/.webp file."
             )
 
         images = [self._preprocess_path(front_path, remove_bg=remove_bg)]
