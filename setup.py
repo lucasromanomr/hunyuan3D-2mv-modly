@@ -570,7 +570,7 @@ def setup(python_exe, ext_dir, gpu_sm):
     # ------------------------------------------------------------------ #
     print("[setup] Installing xformers...")
     if gpu_sm >= 70:
-        pip(venv, "install", "xformers==0.0.29.post3", "--index-url", torch_index)
+        pip(venv, "install", "xformers==0.0.30", "--index-url", torch_index)
     else:
         pip(venv, "install", "xformers==0.0.28.post2", "--index-url",
             "https://download.pytorch.org/whl/cu118")
