@@ -573,11 +573,12 @@ class Hunyuan3D2mvGenerator(BaseGenerator):
         # ---- Load reference images -----------------------------------
         self._report(progress_cb, 8, "Preprocessing reference images...")
 
-        front_path = params.get("front_image_path", "").strip().strip('"\'')
-        if not front_path or not os.path.isfile(front_path):
+        front_path = self._resolve_image_path(params.get("front_image_path", ""))
+        if not front_path:
             raise RuntimeError(
                 "front_image_path is required for texture generation. "
-                "Please supply the same front view used for shape generation."
+                "Please supply the same front view used for shape generation "
+                "(a .png/.jpg/.jpeg/.webp file, or the folder containing it)."
             )
 
         images = [self._preprocess_path(front_path, remove_bg=remove_bg)]
@@ -637,14 +638,40 @@ class Hunyuan3D2mvGenerator(BaseGenerator):
     # Image helpers
     # ------------------------------------------------------------------
 
+    def _resolve_image_path(self, path):
+        """Resolve a user-supplied path that may be a file OR a directory.
+
+        Modly's UI currently always opens a directory picker for type=string
+        params (ignoring pickerIntent: image), so users end up selecting the
+        folder containing the image instead of the image itself. When the
+        path points to a directory, pick the first image file inside.
+        """
+        if not isinstance(path, str):
+            return None
+        path = path.strip().strip('"\'')
+        if not path:
+            return None
+        if os.path.isfile(path):
+            return path
+        if os.path.isdir(path):
+            exts = (".png", ".jpg", ".jpeg", ".webp")
+            try:
+                entries = sorted(os.listdir(path))
+            except OSError:
+                return None
+            for name in entries:
+                if name.lower().endswith(exts):
+                    candidate = os.path.join(path, name)
+                    if os.path.isfile(candidate):
+                        return candidate
+        return None
+
     def _optional_view_image(self, params, view_name, remove_bg):
         path_key = "%s_image_path" % view_name
         data_key = "%s_image" % view_name
 
-        path = params.get(path_key)
-        if isinstance(path, str):
-            path = path.strip().strip('"\'')
-        if path and os.path.isfile(path):
+        path = self._resolve_image_path(params.get(path_key))
+        if path:
             return self._preprocess_path(path, remove_bg=remove_bg)
 
         raw = params.get(data_key)
