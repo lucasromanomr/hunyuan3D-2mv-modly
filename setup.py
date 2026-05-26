@@ -1,365 +1,24 @@
-# """
-# Hunyuan3D-2mv - Modly extension setup script.
-
-# Called by Modly at install time:
-    # python setup.py <json_args>
-
-# json_args keys:
-    # python_exe  - path to Modly's embedded Python
-    # ext_dir     - absolute path to this extension directory
-    # gpu_sm      - GPU compute capability as integer (e.g. 89 for RTX 4050)
-# """
-# import json
-# import os
-# import platform
-# import shutil
-# import subprocess
-# import sys
-# from pathlib import Path
-
-
-# IS_WIN = platform.system() == "Windows"
-
-
-# def pip(venv, *args):
-    # pip_exe = venv / ("Scripts/pip.exe" if IS_WIN else "bin/pip")
-    # subprocess.run([str(pip_exe)] + list(args), check=True)
-
-
-# def python_exe_in_venv(venv):
-    # return venv / ("Scripts/python.exe" if IS_WIN else "bin/python")
-
-
-# def _resolve_cuda_home():
-    # """Find the CUDA toolkit root via every known Windows mechanism."""
-    # for k in ("CUDA_HOME", "CUDA_PATH"):
-        # v = os.environ.get(k)
-        # if v and Path(v).exists():
-            # return v
-    # for k, v in os.environ.items():
-        # if k.startswith("CUDA_PATH_V") and v and Path(v).exists():
-            # return v
-    # nvcc = shutil.which("nvcc") or shutil.which("nvcc.exe")
-    # if nvcc:
-        # root = str(Path(nvcc).parent.parent)
-        # if Path(root).exists():
-            # return root
-    # try:
-        # import winreg
-        # key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-            # r"SOFTWARE\NVIDIA Corporation\GPU Computing Toolkit\CUDA")
-        # versions = []
-        # for i in range(winreg.QueryInfoKey(key)[0]):
-            # try:
-                # sk = winreg.OpenKey(key, winreg.EnumKey(key, i))
-                # p, _ = winreg.QueryValueEx(sk, "InstallDir")
-                # if p and Path(p).exists():
-                    # versions.append(p)
-            # except OSError:
-                # pass
-        # if versions:
-            # return versions[-1]
-    # except OSError:
-        # pass
-    # cuda_base = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA")
-    # if cuda_base.exists():
-        # dirs = sorted([d for d in cuda_base.iterdir() if d.is_dir()], reverse=True)
-        # if dirs:
-            # return str(dirs[0])
-    # return None
-
-
-# def _find_cl_exe():
-    # """Try to locate cl.exe (MSVC compiler) for the rasterizer build on Windows."""
-    # candidates = []
-    # for base in [
-        # r"C:\Program Files\Microsoft Visual Studio",
-        # r"C:\Program Files (x86)\Microsoft Visual Studio",
-    # ]:
-        # base_p = Path(base)
-        # if base_p.exists():
-            # for cl in base_p.rglob("cl.exe"):
-                # if "x64" in str(cl) or "amd64" in str(cl).lower():
-                    # candidates.append(cl)
-    # return candidates[0] if candidates else None
-
-
-# def _build_custom_rasterizer(venv_python, rast_dir):
-    # """
-    # Build the custom_rasterizer C extension in-place and copy it to site-packages.
-
-    # On Windows:
-      # - ninja must be on PATH (installed before this call).
-      # - MSVC cl.exe must be reachable; we try to locate it automatically.
-      # - After build, the .pyd is copied to site-packages so the bare
-        # `import custom_rasterizer` resolves regardless of cwd / sys.path.
-    # """
-    # rast_dir = Path(rast_dir)
-
-    # print("[setup] Building custom_rasterizer in %s ..." % rast_dir)
-
-    # env = os.environ.copy()
-
-    # Inject CUDA_HOME so torch's cpp_extension finds the toolkit
-    # cuda_home = _resolve_cuda_home()
-    # if cuda_home:
-        # env["CUDA_HOME"] = cuda_home
-        # env["CUDA_PATH"] = cuda_home
-        # print("[setup] CUDA_HOME resolved: %s" % cuda_home)
-    # else:
-        # print("[setup] WARNING: Could not auto-detect CUDA_HOME.")
-
-    # if IS_WIN:
-        # Ensure venv Scripts (ninja, etc.) are on PATH
-        # venv_scripts = venv_python.parent
-        # env["PATH"] = str(venv_scripts) + os.pathsep + env.get("PATH", "")
-
-        # Inject MSVC cl.exe if not already visible
-        # if shutil.which("cl") is None:
-            # cl = _find_cl_exe()
-            # if cl:
-                # env["PATH"] = str(cl.parent) + os.pathsep + env["PATH"]
-                # print("[setup] Found cl.exe: %s" % cl)
-            # else:
-                # print(
-                    # "[setup] WARNING: cl.exe not found on PATH.\n"
-                    # "[setup]   Install 'Desktop development with C++' in Visual Studio,\n"
-                    # "[setup]   or run this setup from a VS Developer Command Prompt."
-                # )
-
-    # result = subprocess.run(
-        # [str(venv_python), "setup.py", "build_ext", "--inplace"],
-        # cwd=str(rast_dir),
-        # env=env,
-    # )
-
-    # if result.returncode != 0:
-        # print(
-            # "[setup] WARNING: custom_rasterizer build exited with code %d.\n"
-            # "[setup]   Texture generation will fail until this is fixed." % result.returncode
-        # )
-        # return False
-
-    # Find the compiled artifact (the kernel module name is custom_rasterizer_kernel)
-    # built = (
-        # list(rast_dir.glob("custom_rasterizer_kernel*.pyd")) +
-        # list(rast_dir.glob("custom_rasterizer_kernel*.so"))
-    # )
-    # if not built:
-        # print("[setup] WARNING: build reported success but no .pyd/.so found in %s." % rast_dir)
-        # return False
-
-    # artifact = built[0]
-    # print("[setup] custom_rasterizer built: %s" % artifact)
-
-    # Copy to venv site-packages so bare `import custom_rasterizer` always works
-    # try:
-        # if IS_WIN:
-            # site_pkgs = venv_python.parent.parent / "Lib" / "site-packages"
-        # else:
-            # site_pkgs = sorted(
-                # (venv_python.parent.parent / "lib").glob("python*/site-packages")
-            # )[-1]
-
-        # dest = site_pkgs / artifact.name
-        # shutil.copy2(str(artifact), str(dest))
-        # print("[setup] Installed %s -> %s" % (artifact.name, site_pkgs))
-    # except Exception as exc:
-        # print("[setup] Note: could not copy rasterizer to site-packages (%s)." % exc)
-        # print("[setup]   The extension dir must stay on sys.path at runtime.")
-
-    # Also copy back to extension root so it can be committed to the repo
-    # try:
-        # ext_dir = Path(__file__).parent
-        # ext_dest = ext_dir / artifact.name
-        # shutil.copy2(str(artifact), str(ext_dest))
-        # print("[setup] Saved built artifact to extension root: %s" % ext_dest)
-    # except Exception as exc:
-        # print("[setup] Note: could not save artifact to extension root (%s)." % exc)
-
-    # return True
-
-
-# def setup(python_exe, ext_dir, gpu_sm):
-    # venv = ext_dir / "venv"
-
-    # print("[setup] Creating venv at %s ..." % venv)
-    # subprocess.run([str(python_exe), "-m", "venv", str(venv)], check=True)
-
-    # venv_python = python_exe_in_venv(venv)
-
-    # ------------------------------------------------------------------ #
-    # Build prerequisites — ninja first so the rasterizer can find it
-    # ------------------------------------------------------------------ #
-    # print("[setup] Installing build prerequisites (ninja, setuptools, wheel)...")
-    # pip(venv, "install", "ninja", "setuptools", "wheel")
-
-    # ------------------------------------------------------------------ #
-    # PyTorch
-    # ------------------------------------------------------------------ #
-    # if gpu_sm >= 100:
-        # torch_index = "https://download.pytorch.org/whl/cu128"
-        # torch_pkgs = ["torch>=2.7.0", "torchvision>=0.22.0", "torchaudio>=2.7.0"]
-        # print("[setup] SM %d (Blackwell) -> PyTorch 2.7 + CUDA 12.8" % gpu_sm)
-    # elif gpu_sm >= 70:
-        # torch_index = "https://download.pytorch.org/whl/cu124"
-        # torch_pkgs = ["torch==2.6.0", "torchvision==0.21.0", "torchaudio==2.6.0"]
-        # print("[setup] SM %d -> PyTorch 2.6.0 + CUDA 12.4" % gpu_sm)
-    # else:
-        # torch_index = "https://download.pytorch.org/whl/cu118"
-        # torch_pkgs = ["torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1"]
-        # print("[setup] SM %d (legacy) -> PyTorch 2.5.1 + CUDA 11.8" % gpu_sm)
-
-    # print("[setup] Installing PyTorch...")
-    # pip(venv, "install", *torch_pkgs, "--index-url", torch_index)
-
-    # ------------------------------------------------------------------ #
-    # xformers  (the Triton warning at runtime is harmless on Windows)
-    # ------------------------------------------------------------------ #
-    # print("[setup] Installing xformers...")
-    # if gpu_sm >= 70:
-        # pip(venv, "install", "xformers==0.0.29.post3", "--index-url", torch_index)
-    # else:
-        # pip(venv, "install", "xformers==0.0.28.post2", "--index-url",
-            # "https://download.pytorch.org/whl/cu118")
-
-    # ------------------------------------------------------------------ #
-    # Core dependencies
-    # ------------------------------------------------------------------ #
-    # print("[setup] Installing core dependencies...")
-    # pip(venv, "install",
-        # "accelerate",
-        # "omegaconf",
-        # "einops",
-        # "Pillow",
-        # "numpy",
-        # "scipy",
-        # "trimesh",
-        # "pymeshlab",
-        # "pygltflib",
-        # "opencv-python-headless",
-        # "tqdm",
-        # "safetensors",
-        # "rembg",
-    # )
-
-    # triton: Linux-only; skip silently on Windows (xformers will warn but still work)
-    # if not IS_WIN:
-        # try:
-            # pip(venv, "install", "triton")
-        # except subprocess.CalledProcessError:
-            # print("[setup] triton not available — skipping (non-fatal).")
-
-    # ------------------------------------------------------------------ #
-    # onnxruntime
-    # ------------------------------------------------------------------ #
-    # if gpu_sm >= 70:
-        # print("[setup] Installing onnxruntime-gpu...")
-        # try:
-            # pip(venv, "install", "onnxruntime-gpu")
-        # except subprocess.CalledProcessError:
-            # print("[setup] onnxruntime-gpu failed, falling back to cpu.")
-            # pip(venv, "install", "onnxruntime")
-    # else:
-        # pip(venv, "install", "onnxruntime")
-
-    # ------------------------------------------------------------------ #
-    # Clone Hunyuan3D-2 repo
-    # ------------------------------------------------------------------ #
-    # repo_dir = ext_dir / "Hunyuan3D-2"
-    # if not repo_dir.exists():
-        # print("[setup] Cloning Hunyuan3D-2 repo...")
-        # subprocess.run(
-            # ["git", "clone", "--depth=1",
-             # "https://github.com/Tencent-Hunyuan/Hunyuan3D-2.git",
-             # str(repo_dir)],
-            # check=True
-        # )
-    # else:
-        # print("[setup] Repo already exists, skipping clone.")
-
-    # ------------------------------------------------------------------ #
-    # Build custom_rasterizer BEFORE installing the package
-    # ------------------------------------------------------------------ #
-    # rast_dir = repo_dir / "hy3dgen" / "texgen" / "custom_rasterizer"
-    # rast_ok = _build_custom_rasterizer(venv_python, rast_dir)
-    # if not rast_ok:
-        # print(
-            # "[setup] *** custom_rasterizer was NOT built. ***\n"
-            # "[setup]     Texture generation will fail until this is resolved.\n"
-            # "[setup]     Fix the compiler error above then reinstall the extension."
-        # )
-
-    # ------------------------------------------------------------------ #
-    # Install hy3dgen package (editable) — rasterizer must be built first
-    # ------------------------------------------------------------------ #
-    # print("[setup] Installing hy3dgen package...")
-    # subprocess.run(
-        # [str(venv_python), "-m", "pip", "install", "-e", str(repo_dir)],
-        # check=True
-    # )
-
-    # Install the custom_rasterizer Python package (separate from the kernel .pyd)
-    # print("[setup] Installing custom_rasterizer Python package...")
-    # subprocess.run(
-        # [str(venv_python), "-m", "pip", "install", "-e", str(rast_dir)],
-        # check=True
-    # )
-
-
-    # ------------------------------------------------------------------ #
-    # Final import verification
-    # ------------------------------------------------------------------ #
-    # print("[setup] Verifying custom_rasterizer import...")
-    # check = subprocess.run(
-        # [str(venv_python), "-c",
-         # "import custom_rasterizer_kernel; import custom_rasterizer; print('custom_rasterizer: OK')"],
-        # capture_output=True, text=True,
-    # )
-    # if "OK" in check.stdout:
-        # print("[setup] %s" % check.stdout.strip())
-    # else:
-        # stderr = check.stderr.strip()
-        # print(
-            # "[setup] custom_rasterizer import FAILED.\n"
-            # "[setup]   %s\n"
-            # "[setup]   Ensure MSVC (Visual Studio C++ build tools) and the CUDA\n"
-            # "[setup]   toolkit matching your PyTorch build are installed, then\n"
-            # "[setup]   reinstall this extension." % stderr
-        # )
-
-    # print("[setup] Done. Venv ready at: %s" % venv)
-
-
-# if __name__ == "__main__":
-    # if len(sys.argv) >= 4:
-        # setup(
-            # python_exe=sys.argv[1],
-            # ext_dir=Path(sys.argv[2]),
-            # gpu_sm=int(sys.argv[3]),
-        # )
-    # elif len(sys.argv) == 2:
-        # args = json.loads(sys.argv[1])
-        # setup(
-            # python_exe=args["python_exe"],
-            # ext_dir=Path(args["ext_dir"]),
-            # gpu_sm=int(args["gpu_sm"]),
-        # )
-    # else:
-        # print("Usage: python setup.py <python_exe> <ext_dir> <gpu_sm>")
-        # print('   or: python setup.py \'{"python_exe":"...","ext_dir":"...","gpu_sm":89}\'')
-        # sys.exit(1)
-
 """
-Hunyuan3D-2mv - Modly extension setup script.
+Modly extension setup for Hunyuan3D-2mv.
 
-Called by Modly at install time:
-    python setup.py <json_args>
+Creates an isolated environment using a Conda env (for the CUDA toolkit
+matching PyTorch's bundled CUDA version) plus a regular Python venv
+wrapper that lives at the Modly-expected path:
 
-json_args keys:
-    python_exe  - path to Modly's embedded Python
-    ext_dir     - absolute path to this extension directory
-    gpu_sm      - GPU compute capability as integer (e.g. 89 for RTX 4050)
+    <ext_dir>/venv/Scripts/python.exe   (Windows)
+    <ext_dir>/venv/bin/python           (Linux/Mac)
+
+Layout:
+    <ext_dir>/
+        .conda_env/      # conda env with python + cuda-toolkit
+        venv/            # regular venv whose Python is the conda Python
+        Hunyuan3D-2/     # cloned upstream
+        .bin/            # bundled micromamba binary (if downloaded)
+
+Why both: Modly's runner hard-codes the venv layout. Conda envs have a
+different layout, so we use the conda env strictly to ship a matching
+CUDA toolkit + a Python base, then create a regular venv on top so Modly
+can locate the interpreter at the expected path.
 """
 import json
 import os
@@ -367,365 +26,424 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
 from pathlib import Path
 
-
 IS_WIN = platform.system() == "Windows"
+IS_MAC = platform.system() == "Darwin"
+MACHINE = platform.machine().lower()
 
 
-def pip(venv, *args):
-    pip_exe = venv / ("Scripts/pip.exe" if IS_WIN else "bin/pip")
-    subprocess.run([str(pip_exe)] + list(args), check=True)
+# --------------------------------------------------------------------- #
+# Micromamba bootstrap
+# --------------------------------------------------------------------- #
+
+MICROMAMBA_URLS = {
+    ("Windows", "amd64"):  "https://micro.mamba.pm/api/micromamba/win-64/latest",
+    ("Windows", "x86_64"): "https://micro.mamba.pm/api/micromamba/win-64/latest",
+    ("Linux",   "x86_64"): "https://micro.mamba.pm/api/micromamba/linux-64/latest",
+    ("Linux",   "aarch64"):"https://micro.mamba.pm/api/micromamba/linux-aarch64/latest",
+    ("Darwin",  "x86_64"): "https://micro.mamba.pm/api/micromamba/osx-64/latest",
+    ("Darwin",  "arm64"):  "https://micro.mamba.pm/api/micromamba/osx-arm64/latest",
+}
 
 
-def python_exe_in_venv(venv):
-    return venv / ("Scripts/python.exe" if IS_WIN else "bin/python")
+def _ensure_micromamba(ext_dir):
+    """Return (exe_path, kind). Prefer system conda/mamba/micromamba.
+    Falls back to downloading a private micromamba binary inside ext_dir."""
+    for binary in ("micromamba", "mamba", "conda"):
+        exe = shutil.which(binary)
+        if exe:
+            print("[setup] Using system %s: %s" % (binary, exe))
+            return exe, binary
+
+    bin_dir = ext_dir / ".bin"
+    bin_dir.mkdir(exist_ok=True)
+    target = bin_dir / ("micromamba.exe" if IS_WIN else "micromamba")
+    if target.exists():
+        return str(target), "micromamba"
+
+    key = (platform.system(), MACHINE)
+    url = MICROMAMBA_URLS.get(key)
+    if url is None:
+        raise RuntimeError("No micromamba binary for %s %s" % key)
+
+    archive = bin_dir / "micromamba.tar.bz2"
+    print("[setup] Downloading micromamba: %s" % url)
+    urllib.request.urlretrieve(url, archive)
+
+    with tarfile.open(archive, "r:bz2") as tar:
+        for m in tar.getmembers():
+            name = m.name.replace("\\", "/")
+            if name.endswith("micromamba.exe") or name.endswith("bin/micromamba"):
+                with tar.extractfile(m) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                break
+    archive.unlink(missing_ok=True)
+
+    if not target.exists():
+        raise RuntimeError("micromamba binary not found in downloaded archive")
+    if not IS_WIN:
+        os.chmod(target, 0o755)
+    print("[setup] micromamba installed: %s" % target)
+    return str(target), "micromamba"
 
 
-def _resolve_cuda_home():
-    """Find the CUDA toolkit root via every known Windows mechanism."""
-    for k in ("CUDA_HOME", "CUDA_PATH"):
-        v = os.environ.get(k)
-        if v and Path(v).exists():
-            return v
-    for k, v in os.environ.items():
-        if k.startswith("CUDA_PATH_V") and v and Path(v).exists():
-            return v
-    nvcc = shutil.which("nvcc") or shutil.which("nvcc.exe")
-    if nvcc:
-        root = str(Path(nvcc).parent.parent)
-        if Path(root).exists():
-            return root
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\NVIDIA Corporation\GPU Computing Toolkit\CUDA")
-        versions = []
-        for i in range(winreg.QueryInfoKey(key)[0]):
-            try:
-                sk = winreg.OpenKey(key, winreg.EnumKey(key, i))
-                p, _ = winreg.QueryValueEx(sk, "InstallDir")
-                if p and Path(p).exists():
-                    versions.append(p)
-            except OSError:
-                pass
-        if versions:
-            return versions[-1]
-    except OSError:
-        pass
-    cuda_base = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA")
-    if cuda_base.exists():
-        dirs = sorted([d for d in cuda_base.iterdir() if d.is_dir()], reverse=True)
-        if dirs:
-            return str(dirs[0])
-    return None
+# --------------------------------------------------------------------- #
+# Conda env creation
+# --------------------------------------------------------------------- #
 
+def _cuda_dotted(cuda_version):
+    """128 -> '12.8', 121 -> '12.1', 118 -> '11.8'."""
+    s = str(cuda_version)
+    return "%s.%s" % (s[:-1], s[-1])
+
+
+def _conda_python(conda_prefix):
+    if IS_WIN:
+        return conda_prefix / "python.exe"
+    return conda_prefix / "bin" / "python"
+
+
+def _conda_cuda_home(conda_prefix):
+    """Path that holds bin/, lib/, include/ for the CUDA toolkit."""
+    if IS_WIN:
+        return conda_prefix / "Library"
+    return conda_prefix
+
+
+def _create_conda_env(mamba_exe, mamba_kind, conda_prefix, cuda_version):
+    cuda_str = _cuda_dotted(cuda_version)
+    print("[setup] Creating conda env at %s (python=3.11, cuda-toolkit=%s)" %
+          (conda_prefix, cuda_str))
+
+    if mamba_kind == "micromamba":
+        cmd = [mamba_exe, "create", "-y", "-p", str(conda_prefix),
+               "-c", "nvidia/label/cuda-%s.0" % cuda_str,
+               "-c", "conda-forge",
+               "python=3.11", "cuda-toolkit"]
+    elif mamba_kind == "mamba":
+        cmd = [mamba_exe, "create", "-y", "-p", str(conda_prefix),
+               "-c", "nvidia", "-c", "conda-forge",
+               "python=3.11", "cuda-toolkit=%s" % cuda_str]
+    else:  # conda
+        cmd = [mamba_exe, "create", "-y", "-p", str(conda_prefix),
+               "--no-default-packages",
+               "-c", "nvidia", "-c", "conda-forge",
+               "python=3.11", "cuda-toolkit=%s" % cuda_str]
+
+    subprocess.run(cmd, check=True)
+
+
+# --------------------------------------------------------------------- #
+# venv wrapper + pip helpers
+# --------------------------------------------------------------------- #
+
+def _venv_python(venv_dir):
+    if IS_WIN:
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+def _site_packages(venv_dir):
+    if IS_WIN:
+        return venv_dir / "Lib" / "site-packages"
+    return sorted((venv_dir / "lib").glob("python*/site-packages"))[-1]
+
+
+def _create_venv(conda_python, venv_dir):
+    print("[setup] Creating venv at %s (base: %s)" % (venv_dir, conda_python))
+    # --system-site-packages exposes the conda env's pythonXX.dll/site-packages,
+    # but we want isolation for installed deps. Plain venv suffices because
+    # pythonXX.dll resolves next to python.exe via the venvlauncher trick.
+    subprocess.run([str(conda_python), "-m", "venv", str(venv_dir)], check=True)
+
+
+def pip(venv_dir, *args, env=None):
+    py = _venv_python(venv_dir)
+    subprocess.run([str(py), "-m", "pip", *args], check=True, env=env)
+
+
+# --------------------------------------------------------------------- #
+# Runtime DLL/PATH hook
+# --------------------------------------------------------------------- #
+
+def _write_runtime_pth(venv_dir, cuda_home):
+    """Drop a .pth file so importing anything in the venv auto-adds the
+    conda env's CUDA bin dir to the DLL search path / LD path."""
+    sp = _site_packages(venv_dir)
+    sp.mkdir(parents=True, exist_ok=True)
+
+    if IS_WIN:
+        body = (
+            "import os\n"
+            "_p = r'%s'\n"
+            "try:\n"
+            "    os.add_dll_directory(_p)\n"
+            "except Exception:\n"
+            "    pass\n"
+            "os.environ.setdefault('CUDA_HOME', r'%s')\n"
+            "os.environ.setdefault('CUDA_PATH', r'%s')\n"
+            "os.environ['PATH'] = _p + os.pathsep + os.environ.get('PATH', '')\n"
+        ) % (str(cuda_home / "bin"), str(cuda_home), str(cuda_home))
+        # .pth files must be one logical line per entry; use exec-on-import trick
+        pth = "import modly_cuda_hook\n"
+        (sp / "modly_cuda.pth").write_text(pth, encoding="utf-8")
+        (sp / "modly_cuda_hook.py").write_text(body, encoding="utf-8")
+    else:
+        lib_dir = str(cuda_home / "lib")
+        body = (
+            "import os\n"
+            "_p = r'%s'\n"
+            "os.environ.setdefault('CUDA_HOME', r'%s')\n"
+            "os.environ['LD_LIBRARY_PATH'] = _p + os.pathsep + os.environ.get('LD_LIBRARY_PATH', '')\n"
+        ) % (lib_dir, str(cuda_home))
+        (sp / "modly_cuda.pth").write_text("import modly_cuda_hook\n", encoding="utf-8")
+        (sp / "modly_cuda_hook.py").write_text(body, encoding="utf-8")
+
+
+# --------------------------------------------------------------------- #
+# Compiler / MSVC discovery (Windows)
+# --------------------------------------------------------------------- #
 
 def _find_cl_exe():
-    """Try to locate cl.exe (MSVC compiler) for the rasterizer build on Windows."""
     candidates = []
-    for base in [
-        r"C:\Program Files\Microsoft Visual Studio",
-        r"C:\Program Files (x86)\Microsoft Visual Studio",
-    ]:
-        base_p = Path(base)
-        if base_p.exists():
-            for cl in base_p.rglob("cl.exe"):
-                if "x64" in str(cl) or "amd64" in str(cl).lower():
-                    candidates.append(cl)
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    for root in (pf, pf86):
+        for edition in ("BuildTools", "Community", "Professional", "Enterprise"):
+            base = Path(root) / "Microsoft Visual Studio" / "2022" / edition / "VC" / "Tools" / "MSVC"
+            if base.exists():
+                candidates += list(base.glob("*/bin/Hostx64/x64/cl.exe"))
+            base19 = Path(root) / "Microsoft Visual Studio" / "2019" / edition / "VC" / "Tools" / "MSVC"
+            if base19.exists():
+                candidates += list(base19.glob("*/bin/Hostx64/x64/cl.exe"))
     return candidates[0] if candidates else None
 
 
-def _build_custom_rasterizer(venv_python, rast_dir):
-    """
-    Build the custom_rasterizer C extension in-place and copy it to site-packages.
+# --------------------------------------------------------------------- #
+# custom_rasterizer build
+# --------------------------------------------------------------------- #
 
-    On Windows:
-      - ninja must be on PATH (installed before this call).
-      - MSVC cl.exe must be reachable; we try to locate it automatically.
-      - After build, the .pyd is copied to site-packages so the bare
-        `import custom_rasterizer` resolves regardless of cwd / sys.path.
-    """
-    rast_dir = Path(rast_dir)
-
-    print("[setup] Building custom_rasterizer in %s ..." % rast_dir)
+def _build_rasterizer(venv_dir, rast_dir, cuda_home):
+    if not rast_dir.exists():
+        print("[setup] rast_dir not found: %s" % rast_dir)
+        return False
 
     env = os.environ.copy()
-
-    # Inject CUDA_HOME so torch's cpp_extension finds the toolkit
-    cuda_home = _resolve_cuda_home()
-    if cuda_home:
-        env["CUDA_HOME"] = cuda_home
-        env["CUDA_PATH"] = cuda_home
-        print("[setup] CUDA_HOME resolved: %s" % cuda_home)
-    else:
-        print("[setup] WARNING: Could not auto-detect CUDA_HOME.")
+    env["CUDA_HOME"] = str(cuda_home)
+    env["CUDA_PATH"] = str(cuda_home)
 
     if IS_WIN:
-        # Ensure venv Scripts (ninja, etc.) are on PATH
-        venv_scripts = venv_python.parent
-        env["PATH"] = str(venv_scripts) + os.pathsep + env.get("PATH", "")
-
-        # Inject MSVC cl.exe if not already visible
-        if shutil.which("cl") is None:
+        bin_dir = cuda_home / "bin"
+        env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+        env["PATH"] = str(_venv_python(venv_dir).parent) + os.pathsep + env["PATH"]
+        if shutil.which("cl", path=env["PATH"]) is None:
             cl = _find_cl_exe()
             if cl:
                 env["PATH"] = str(cl.parent) + os.pathsep + env["PATH"]
-                print("[setup] Found cl.exe: %s" % cl)
+                print("[setup] Using cl.exe: %s" % cl)
             else:
-                print(
-                    "[setup] WARNING: cl.exe not found on PATH.\n"
-                    "[setup]   Install 'Desktop development with C++' in Visual Studio,\n"
-                    "[setup]   or run this setup from a VS Developer Command Prompt."
-                )
+                print("[setup] WARNING: cl.exe not found; build will likely fail")
 
+    print("[setup] Building custom_rasterizer (CUDA_HOME=%s)" % cuda_home)
     result = subprocess.run(
-        [str(venv_python), "setup.py", "build_ext", "--inplace"],
+        [str(_venv_python(venv_dir)), "setup.py", "build_ext", "--inplace"],
         cwd=str(rast_dir),
         env=env,
     )
-
     if result.returncode != 0:
-        print(
-            "[setup] WARNING: custom_rasterizer build exited with code %d.\n"
-            "[setup]   Texture generation will fail until this is fixed." % result.returncode
-        )
+        print("[setup] custom_rasterizer build exited with code %d" % result.returncode)
         return False
 
-    # Find the compiled artifact (the kernel module name is custom_rasterizer_kernel)
-    built = (
-        list(rast_dir.glob("custom_rasterizer_kernel*.pyd")) +
-        list(rast_dir.glob("custom_rasterizer_kernel*.so"))
-    )
+    built = (list(rast_dir.glob("custom_rasterizer_kernel*.pyd")) +
+             list(rast_dir.glob("custom_rasterizer_kernel*.so")))
     if not built:
-        print("[setup] WARNING: build reported success but no .pyd/.so found in %s." % rast_dir)
+        print("[setup] no built artifact found in %s" % rast_dir)
         return False
 
     artifact = built[0]
-    print("[setup] custom_rasterizer built: %s" % artifact)
+    sp = _site_packages(venv_dir)
+    shutil.copy2(str(artifact), str(sp / artifact.name))
+    print("[setup] Built rasterizer: %s -> %s" % (artifact.name, sp))
 
-    # Copy to venv site-packages so bare `import custom_rasterizer` always works
+    # Save back to extension root for future installs
+    ext_dest = Path(__file__).parent / artifact.name
     try:
-        if IS_WIN:
-            site_pkgs = venv_python.parent.parent / "Lib" / "site-packages"
-        else:
-            site_pkgs = sorted(
-                (venv_python.parent.parent / "lib").glob("python*/site-packages")
-            )[-1]
-
-        dest = site_pkgs / artifact.name
-        shutil.copy2(str(artifact), str(dest))
-        print("[setup] Installed %s -> %s" % (artifact.name, site_pkgs))
-    except Exception as exc:
-        print("[setup] Note: could not copy rasterizer to site-packages (%s)." % exc)
-        print("[setup]   The extension dir must stay on sys.path at runtime.")
-
-    # Also copy back to extension root so it can be committed to the repo
-    try:
-        ext_dir = Path(__file__).parent
-        ext_dest = ext_dir / artifact.name
         shutil.copy2(str(artifact), str(ext_dest))
-        print("[setup] Saved built artifact to extension root: %s" % ext_dest)
-    except Exception as exc:
-        print("[setup] Note: could not save artifact to extension root (%s)." % exc)
-
+    except Exception:
+        pass
     return True
 
 
-def setup(python_exe, ext_dir, gpu_sm):
-    venv = ext_dir / "venv"
+def _use_prebuilt_rasterizer(venv_dir, rast_dir):
+    ext_dir = Path(__file__).parent
+    prebuilt = list(ext_dir.glob("custom_rasterizer_kernel*.pyd"))
+    if not prebuilt:
+        return False
+    art = prebuilt[0]
+    print("[setup] Falling back to prebuilt kernel: %s" % art.name)
+    rast_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(art), str(rast_dir / art.name))
+    sp = _site_packages(venv_dir)
+    shutil.copy2(str(art), str(sp / art.name))
+    return True
 
-    print("[setup] Creating venv at %s ..." % venv)
-    subprocess.run([str(python_exe), "-m", "venv", str(venv)], check=True)
 
-    venv_python = python_exe_in_venv(venv)
+# --------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------- #
 
-    # ------------------------------------------------------------------ #
-    # Build prerequisites — ninja first so the rasterizer can find it
-    # ------------------------------------------------------------------ #
-    print("[setup] Installing build prerequisites (ninja, setuptools, wheel)...")
-    pip(venv, "install", "ninja", "setuptools", "wheel")
+def setup(python_exe, ext_dir, gpu_sm, cuda_version=128):
+    ext_dir = Path(ext_dir).resolve()
+    conda_prefix = ext_dir / ".conda_env"
+    venv_dir = ext_dir / "venv"
 
-    # ------------------------------------------------------------------ #
-    # PyTorch
-    # ------------------------------------------------------------------ #
-    if gpu_sm >= 100:
-        torch_index = "https://download.pytorch.org/whl/cu128"
+    # ----- 1. micromamba ----------------------------------------------- #
+    mamba_exe, mamba_kind = _ensure_micromamba(ext_dir)
+
+    # ----- 2. conda env with cuda-toolkit ------------------------------ #
+    conda_python = _conda_python(conda_prefix)
+    if not conda_python.exists():
+        _create_conda_env(mamba_exe, mamba_kind, conda_prefix, cuda_version)
+    else:
+        print("[setup] Conda env exists at %s" % conda_prefix)
+
+    if not conda_python.exists():
+        raise RuntimeError("Conda env created but python missing at %s" % conda_python)
+
+    cuda_home = _conda_cuda_home(conda_prefix)
+
+    # ----- 3. venv wrapper on top of conda python --------------------- #
+    if not _venv_python(venv_dir).exists():
+        _create_venv(conda_python, venv_dir)
+    else:
+        print("[setup] venv exists at %s" % venv_dir)
+
+    # ----- 4. runtime PATH hook --------------------------------------- #
+    _write_runtime_pth(venv_dir, cuda_home)
+
+    # ----- 5. build tools --------------------------------------------- #
+    pip(venv_dir, "install", "--upgrade", "pip")
+    pip(venv_dir, "install", "ninja", "setuptools", "wheel")
+
+    # ----- 6. pytorch + xformers -------------------------------------- #
+    cuda_str = "cu%d" % cuda_version
+    torch_index = "https://download.pytorch.org/whl/%s" % cuda_str
+
+    if cuda_version >= 128:
         torch_pkgs = ["torch>=2.7.0", "torchvision>=0.22.0", "torchaudio>=2.7.0"]
-        print("[setup] SM %d (Blackwell) -> PyTorch 2.7 + CUDA 12.8" % gpu_sm)
-    elif gpu_sm >= 70:
-        torch_index = "https://download.pytorch.org/whl/cu124"
+        xformers_pkg = "xformers==0.0.30"
+    elif cuda_version >= 124:
         torch_pkgs = ["torch==2.6.0", "torchvision==0.21.0", "torchaudio==2.6.0"]
-        print("[setup] SM %d -> PyTorch 2.6.0 + CUDA 12.4" % gpu_sm)
+        xformers_pkg = "xformers==0.0.30"
     else:
-        torch_index = "https://download.pytorch.org/whl/cu118"
         torch_pkgs = ["torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1"]
-        print("[setup] SM %d (legacy) -> PyTorch 2.5.1 + CUDA 11.8" % gpu_sm)
+        xformers_pkg = "xformers==0.0.28.post2"
 
-    print("[setup] Installing PyTorch...")
-    pip(venv, "install", *torch_pkgs, "--index-url", torch_index)
+    print("[setup] Installing PyTorch (%s)" % cuda_str)
+    pip(venv_dir, "install", *torch_pkgs, "--index-url", torch_index)
 
-    # ------------------------------------------------------------------ #
-    # xformers  (the Triton warning at runtime is harmless on Windows)
-    # ------------------------------------------------------------------ #
-    print("[setup] Installing xformers...")
+    print("[setup] Installing %s" % xformers_pkg)
     if gpu_sm >= 70:
-        pip(venv, "install", "xformers==0.0.30", "--index-url", torch_index)
+        pip(venv_dir, "install", xformers_pkg, "--index-url", torch_index)
     else:
-        pip(venv, "install", "xformers==0.0.28.post2", "--index-url",
-            "https://download.pytorch.org/whl/cu118")
+        pip(venv_dir, "install", "xformers==0.0.28.post2",
+            "--index-url", "https://download.pytorch.org/whl/cu118")
 
-    # ------------------------------------------------------------------ #
-    # Core dependencies
-    # ------------------------------------------------------------------ #
-    print("[setup] Installing core dependencies...")
-    pip(venv, "install",
-        "accelerate",
-        "omegaconf",
-        "einops",
-        "Pillow",
-        "numpy",
-        "scipy",
-        "trimesh",
-        "pymeshlab",
-        "pygltflib",
-        "opencv-python-headless",
-        "tqdm",
-        "safetensors",
-        "rembg",
-    )
+    # ----- 7. core deps ----------------------------------------------- #
+    print("[setup] Installing core dependencies")
+    pip(venv_dir, "install",
+        "accelerate", "omegaconf", "einops", "Pillow", "numpy", "scipy",
+        "trimesh", "pymeshlab", "pygltflib", "opencv-python-headless",
+        "tqdm", "safetensors", "rembg")
 
-    # triton: Linux-only; skip silently on Windows (xformers will warn but still work)
     if not IS_WIN:
         try:
-            pip(venv, "install", "triton")
+            pip(venv_dir, "install", "triton")
         except subprocess.CalledProcessError:
-            print("[setup] triton not available — skipping (non-fatal).")
+            print("[setup] triton skip (non-fatal)")
 
-    # ------------------------------------------------------------------ #
-    # onnxruntime
-    # ------------------------------------------------------------------ #
+    print("[setup] Installing onnxruntime")
     if gpu_sm >= 70:
-        print("[setup] Installing onnxruntime-gpu...")
         try:
-            pip(venv, "install", "onnxruntime-gpu")
+            pip(venv_dir, "install", "onnxruntime-gpu")
         except subprocess.CalledProcessError:
-            print("[setup] onnxruntime-gpu failed, falling back to cpu.")
-            pip(venv, "install", "onnxruntime")
+            pip(venv_dir, "install", "onnxruntime")
     else:
-        pip(venv, "install", "onnxruntime")
+        pip(venv_dir, "install", "onnxruntime")
 
-    # ------------------------------------------------------------------ #
-    # Clone Hunyuan3D-2 repo
-    # ------------------------------------------------------------------ #
+    # ----- 8. clone Hunyuan3D-2 --------------------------------------- #
     repo_dir = ext_dir / "Hunyuan3D-2"
     if not repo_dir.exists():
-        print("[setup] Cloning Hunyuan3D-2 repo...")
+        print("[setup] Cloning Hunyuan3D-2")
         subprocess.run(
             ["git", "clone", "--depth=1",
              "https://github.com/Tencent-Hunyuan/Hunyuan3D-2.git",
              str(repo_dir)],
-            check=True
+            check=True,
         )
     else:
-        print("[setup] Repo already exists, skipping clone.")
+        print("[setup] Hunyuan3D-2 already present")
 
-    # ------------------------------------------------------------------ #
-    # custom_rasterizer kernel: try to build, fall back to prebuilt .pyd
-    # shipped with the extension if the build fails (CUDA toolkit mismatch,
-    # missing MSVC, etc.). The prebuilt is cp311 win_amd64 only.
-    # ------------------------------------------------------------------ #
+    # ----- 9. build custom_rasterizer (or fall back to prebuilt) ------ #
     rast_dir = repo_dir / "hy3dgen" / "texgen" / "custom_rasterizer"
-    rast_ok = _build_custom_rasterizer(venv_python, rast_dir)
+    rast_ok = _build_rasterizer(venv_dir, rast_dir, cuda_home)
+    if not rast_ok:
+        rast_ok = _use_prebuilt_rasterizer(venv_dir, rast_dir)
+        if not rast_ok:
+            print("[setup] *** custom_rasterizer unavailable — texture step will fail ***")
 
-    if not rast_ok and IS_WIN:
-        ext_dir = Path(__file__).parent
-        prebuilt = list(ext_dir.glob("custom_rasterizer_kernel*.pyd"))
-        if prebuilt:
-            artifact = prebuilt[0]
-            print("[setup] Build failed; using prebuilt kernel: %s" % artifact.name)
-            site_pkgs = venv_python.parent.parent / "Lib" / "site-packages"
-            dest_sp = site_pkgs / artifact.name
-            shutil.copy2(str(artifact), str(dest_sp))
-            dest_rast = rast_dir / artifact.name
-            dest_rast.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(artifact), str(dest_rast))
-            print("[setup] Installed prebuilt %s -> %s" % (artifact.name, site_pkgs))
-            rast_ok = True
-        else:
-            print(
-                "[setup] *** custom_rasterizer was NOT built and no prebuilt .pyd found. ***\n"
-                "[setup]     Texture generation will fail until this is resolved."
-            )
-
-    # ------------------------------------------------------------------ #
-    # Install hy3dgen package (editable) — rasterizer must be built first
-    # ------------------------------------------------------------------ #
-    print("[setup] Installing hy3dgen package...")
+    # ----- 10. install Python packages -------------------------------- #
+    print("[setup] Installing hy3dgen (editable)")
     subprocess.run(
-        [str(venv_python), "-m", "pip", "install", "-e", str(repo_dir)],
-        check=True
+        [str(_venv_python(venv_dir)), "-m", "pip", "install", "-e", str(repo_dir)],
+        check=True,
     )
 
-    # Install the custom_rasterizer Python package (separate from the kernel
-    # .pyd). When we used the prebuilt kernel, skip rebuilding the extension
-    # by setting an env var the package's setup.py can honor — and if it
-    # tries anyway, fall back to manually copying its Python sources.
-    print("[setup] Installing custom_rasterizer Python package...")
-    install_env = os.environ.copy()
-    install_env["CUSTOM_RASTERIZER_SKIP_BUILD"] = "1"
+    print("[setup] Installing custom_rasterizer Python package")
+    env = os.environ.copy()
+    env["CUDA_HOME"] = str(cuda_home)
+    env["CUDA_PATH"] = str(cuda_home)
+    if IS_WIN:
+        env["PATH"] = str(cuda_home / "bin") + os.pathsep + env.get("PATH", "")
     result = subprocess.run(
-        [str(venv_python), "-m", "pip", "install", "-e", str(rast_dir)],
-        env=install_env,
+        [str(_venv_python(venv_dir)), "-m", "pip", "install", "-e", str(rast_dir)],
+        env=env,
     )
     if result.returncode != 0:
-        print("[setup] pip install -e failed; copying Python sources manually.")
-        site_pkgs = venv_python.parent.parent / "Lib" / "site-packages"
+        print("[setup] pip install -e rast_dir failed; copying Python sources")
         py_src = rast_dir / "custom_rasterizer"
         if py_src.is_dir():
-            shutil.copytree(str(py_src), str(site_pkgs / "custom_rasterizer"),
-                            dirs_exist_ok=True)
-            print("[setup] Copied custom_rasterizer/ -> %s" % site_pkgs)
+            sp = _site_packages(venv_dir)
+            shutil.copytree(str(py_src), str(sp / "custom_rasterizer"), dirs_exist_ok=True)
 
-    # ------------------------------------------------------------------ #
-    # Final import verification
-    # ------------------------------------------------------------------ #
-    print("[setup] Verifying custom_rasterizer import...")
-    check = subprocess.run(
-        [str(venv_python), "-c",
-         "import custom_rasterizer_kernel; import custom_rasterizer; print('custom_rasterizer: OK')"],
-        capture_output=True, text=True,
-    )
-    if "OK" in check.stdout:
-        print("[setup] %s" % check.stdout.strip())
-    else:
-        stderr = check.stderr.strip()
-        print(
-            "[setup] custom_rasterizer import FAILED.\n"
-            "[setup]   %s\n"
-            "[setup]   Ensure MSVC (Visual Studio C++ build tools) and the CUDA\n"
-            "[setup]   toolkit matching your PyTorch build are installed, then\n"
-            "[setup]   reinstall this extension." % stderr
-        )
-
-    print("[setup] Done. Venv ready at: %s" % venv)
+    print("[setup] DONE")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 4:
+    if len(sys.argv) == 2:
+        try:
+            args = json.loads(sys.argv[1])
+            setup(
+                python_exe=args["python_exe"],
+                ext_dir=args["ext_dir"],
+                gpu_sm=int(args["gpu_sm"]),
+                cuda_version=int(args.get("cuda_version", 128)),
+            )
+        except (json.JSONDecodeError, KeyError) as e:
+            print("Bad JSON args: %s" % e, file=sys.stderr)
+            sys.exit(1)
+    elif len(sys.argv) >= 4:
+        cuda_version = int(sys.argv[4]) if len(sys.argv) >= 5 else 128
         setup(
             python_exe=sys.argv[1],
-            ext_dir=Path(sys.argv[2]),
+            ext_dir=sys.argv[2],
             gpu_sm=int(sys.argv[3]),
-        )
-    elif len(sys.argv) == 2:
-        args = json.loads(sys.argv[1])
-        setup(
-            python_exe=args["python_exe"],
-            ext_dir=Path(args["ext_dir"]),
-            gpu_sm=int(args["gpu_sm"]),
+            cuda_version=cuda_version,
         )
     else:
-        print("Usage: python setup.py <python_exe> <ext_dir> <gpu_sm>")
-        print('   or: python setup.py \'{"python_exe":"...","ext_dir":"...","gpu_sm":89}\'')
+        print('Usage: setup.py <python_exe> <ext_dir> <gpu_sm> [cuda_version]')
+        print('   or: setup.py \'{"python_exe":"...","ext_dir":"...","gpu_sm":89,"cuda_version":128}\'')
         sys.exit(1)
