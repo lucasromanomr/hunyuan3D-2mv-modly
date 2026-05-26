@@ -332,12 +332,16 @@ def setup(python_exe, ext_dir, gpu_sm, cuda_version=128):
     cuda_str = "cu%d" % cuda_version
     torch_index = "https://download.pytorch.org/whl/%s" % cuda_str
 
+    # Pin exact torch/torchvision/torchaudio triples. Mixing 'torch>=2.7' with
+    # 'torchvision>=0.22' lets pip resolve to incompatible majors (e.g. torch
+    # 2.8 + torchvision 0.22), which silently breaks at import time with
+    # "operator torchvision::nms does not exist".
     if cuda_version >= 128:
-        torch_pkgs = ["torch>=2.7.0", "torchvision>=0.22.0", "torchaudio>=2.7.0"]
+        torch_pkgs = ["torch==2.7.0", "torchvision==0.22.0", "torchaudio==2.7.0"]
         xformers_pkg = "xformers==0.0.30"
     elif cuda_version >= 124:
         torch_pkgs = ["torch==2.6.0", "torchvision==0.21.0", "torchaudio==2.6.0"]
-        xformers_pkg = "xformers==0.0.30"
+        xformers_pkg = "xformers==0.0.29.post1"
     else:
         torch_pkgs = ["torch==2.5.1", "torchvision==0.20.1", "torchaudio==2.5.1"]
         xformers_pkg = "xformers==0.0.28.post2"
