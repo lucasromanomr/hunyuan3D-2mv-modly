@@ -631,16 +631,32 @@ def setup(python_exe, ext_dir, gpu_sm):
         print("[setup] Repo already exists, skipping clone.")
 
     # ------------------------------------------------------------------ #
-    # Build custom_rasterizer BEFORE installing the package
+    # custom_rasterizer kernel: try to build, fall back to prebuilt .pyd
+    # shipped with the extension if the build fails (CUDA toolkit mismatch,
+    # missing MSVC, etc.). The prebuilt is cp311 win_amd64 only.
     # ------------------------------------------------------------------ #
     rast_dir = repo_dir / "hy3dgen" / "texgen" / "custom_rasterizer"
     rast_ok = _build_custom_rasterizer(venv_python, rast_dir)
-    if not rast_ok:
-        print(
-            "[setup] *** custom_rasterizer was NOT built. ***\n"
-            "[setup]     Texture generation will fail until this is resolved.\n"
-            "[setup]     Fix the compiler error above then reinstall the extension."
-        )
+
+    if not rast_ok and IS_WIN:
+        ext_dir = Path(__file__).parent
+        prebuilt = list(ext_dir.glob("custom_rasterizer_kernel*.pyd"))
+        if prebuilt:
+            artifact = prebuilt[0]
+            print("[setup] Build failed; using prebuilt kernel: %s" % artifact.name)
+            site_pkgs = venv_python.parent.parent / "Lib" / "site-packages"
+            dest_sp = site_pkgs / artifact.name
+            shutil.copy2(str(artifact), str(dest_sp))
+            dest_rast = rast_dir / artifact.name
+            dest_rast.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(artifact), str(dest_rast))
+            print("[setup] Installed prebuilt %s -> %s" % (artifact.name, site_pkgs))
+            rast_ok = True
+        else:
+            print(
+                "[setup] *** custom_rasterizer was NOT built and no prebuilt .pyd found. ***\n"
+                "[setup]     Texture generation will fail until this is resolved."
+            )
 
     # ------------------------------------------------------------------ #
     # Install hy3dgen package (editable) — rasterizer must be built first
@@ -651,12 +667,25 @@ def setup(python_exe, ext_dir, gpu_sm):
         check=True
     )
 
-    # Install the custom_rasterizer Python package (separate from the kernel .pyd)
+    # Install the custom_rasterizer Python package (separate from the kernel
+    # .pyd). When we used the prebuilt kernel, skip rebuilding the extension
+    # by setting an env var the package's setup.py can honor — and if it
+    # tries anyway, fall back to manually copying its Python sources.
     print("[setup] Installing custom_rasterizer Python package...")
-    subprocess.run(
+    install_env = os.environ.copy()
+    install_env["CUSTOM_RASTERIZER_SKIP_BUILD"] = "1"
+    result = subprocess.run(
         [str(venv_python), "-m", "pip", "install", "-e", str(rast_dir)],
-        check=True
+        env=install_env,
     )
+    if result.returncode != 0:
+        print("[setup] pip install -e failed; copying Python sources manually.")
+        site_pkgs = venv_python.parent.parent / "Lib" / "site-packages"
+        py_src = rast_dir / "custom_rasterizer"
+        if py_src.is_dir():
+            shutil.copytree(str(py_src), str(site_pkgs / "custom_rasterizer"),
+                            dirs_exist_ok=True)
+            print("[setup] Copied custom_rasterizer/ -> %s" % site_pkgs)
 
     # ------------------------------------------------------------------ #
     # Final import verification
